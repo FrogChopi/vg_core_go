@@ -57,7 +57,22 @@ type Card struct {
 	Effect         []CardText
 	Flavor         string
 	Boons          []Boon
+	Locked         bool
 }
+
+func ToString(card *Card) string {
+	if card == nil {
+		return "nil"
+	}
+
+	locked := ""
+	if card.Locked {
+		locked = " [LOCKED]"
+	}
+
+	return locked + "[" + card.ID + "] G" + strconv.Itoa(card.Grade) + " - " + card.Name + " => " + card.CardNumberFull + " ATK : " + strconv.Itoa(card.Power) + " DEF : " + strconv.Itoa(card.Shield) + " CRIT : " + strconv.Itoa(card.Critical)
+}
+
 
 func (rc *RawCard) ToCard() (*Card, error) {
 	if rc == nil {
@@ -76,7 +91,11 @@ func (rc *RawCard) ToCard() (*Card, error) {
 		})
 	}
 
-	grade, _ := strconv.Atoi(strings.Replace(rc.Grade, "Grade ", "", -1))
+	grade := -1
+	if rc.Grade != "" {
+		grade, _ = strconv.Atoi(strings.Replace(rc.Grade, "Grade ", "", -1))
+	}
+
 	power, _ := strconv.Atoi(strings.Replace(rc.Power, "Power ", "", -1))
 	critical, _ := strconv.Atoi(strings.Replace(rc.Critical, "Critical ", "", -1))
 	shield, _ := strconv.Atoi(strings.Replace(rc.Shield, "Shield ", "", -1))

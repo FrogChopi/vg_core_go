@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>VG Core WebSocket Client</title>
+    <style>
+        body { font-family: sans-serif; padding: 20px; }
+        .controls { margin-bottom: 20px; }
+        button { margin-right: 10px; padding: 5px 10px; }
+        #log { border: 1px solid #ccc; padding: 10px; height: 300px; overflow-y: scroll; background: #f9f9f9; }
+        .status { margin-bottom: 10px; font-weight: bold; }
+    </style>
+</head>
+<body>
+    <h1>VG Core Game Client</h1>
+    <div class="status">My ID: <span id="my-id"></span></div>
+    <div class="status">Current Room: <span id="current-room">None</span></div>
+
+    <div class="controls">
+        <button onclick="createRoom()">Create Room</button>
+        <input type="text" id="room-id-input" placeholder="Room ID">
+        <button onclick="joinRoom()">Join Room</button>
+        <button onclick="quitRoom()">Quit Room</button>
+    </div>
+    <div class="controls">
+        <button onclick="createParty()">Create Party (Need 2+ Players)</button>
+        <button onclick="closeParty()">Close Party</button>
+    </div>
+
+    <div id="log"></div>
+
+    <script>
+        let myID = localStorage.getItem('vg_client_id');
+        if (!myID) {
+            myID = crypto.randomUUID();
+            localStorage.setItem('vg_client_id', myID);
+        }
+        document.getElementById('my-id').innerText = myID;
+
+        const ws = new WebSocket('ws://' + window.location.host + '/ws?id=' + myID);
+
+        ws.onopen = () => log("Connected to WebSocket");
+        ws.onclose = () => log("Disconnected from WebSocket");
+        ws.onmessage = (event) => {
+            const data = JSON.parse(event.data);
+            log("Received: " + JSON.stringify(data));
+
+            if (data.event === "room_joined") {
+                document.getElementById('current-room').innerText = data.room_id;
+            } else if (data.event === "player_left" && data.player_id === myID) {
+                document.getElementById('current-room').innerText = "None";
+            } else if (data.event === "party_closed") {
+                log("Party closed.");
+            }
+        };
+
+        function send(action, payload = {}) {
+            ws.send(JSON.stringify({ action, payload }));
+        }
+
+        function createRoom() { send("create_room"); }
+        function joinRoom() {
+            const roomId = document.getElementById('room-id-input').value;
+            if (roomId) send("join_room", { room_id: roomId });
+        }
+        function quitRoom() { send("quit_room"); document.getElementById('current-room').innerText = "None"; }
+        function createParty() { send("create_party"); }
+        function closeParty() { send("close_party"); }
+
+        function log(msg) {
+            const logDiv = document.getElementById('log');
+            const p = document.createElement('div');
+            p.innerText = new Date().toLocaleTimeString() + " - " + msg;
+            logDiv.prepend(p);
+        }
+    </script>
+</body>
+</html>

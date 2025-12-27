@@ -3,10 +3,17 @@ package core
 import (
 	"bufio"
 	"encoding/json"
+	"math/rand"
 	"os"
 	"strconv"
 	"strings"
+	"time"
 )
+
+type Event struct {
+	EventType string
+	FuncCall  func() `json:"-"`
+}
 
 type Deck struct {
 	RideDeck [5]*Card
@@ -14,18 +21,165 @@ type Deck struct {
 	GDeck    [8]*Card
 }
 
+type Circle struct {
+	TopCard   *Card
+	Soul	  *Card
+	Boon      *Card
+}
+
+type Player struct {
+	RideDeck    []*Card
+	MainDeck    []*Card
+	GDeck       []*Card
+	DamageZone  []*Card
+	Hand        []*Card
+	OrderZone   []*Card
+	GuardZone   []*Card
+	TriggerZone []*Card
+	BindZone    []*Card
+	DropZone    []*Card
+	Rear1  		Circle
+	Vanguard  	Circle
+	Rear2  		Circle
+	Rear3  		Circle
+	Rear4  		Circle
+	Rear5  		Circle
+}
+
+type Party struct {
+	seed    	string
+	rand        *rand.Rand
+	Players     []Player
+	Turn    	int
+	EventQueue  []Event
+	History     []Event
+}
+
+func PrintDeck(deck *Deck) {
+	println("Ride Deck: [")
+	for _, card := range deck.RideDeck {
+		println("\t" + ToString(card))
+	}
+	println("]\n")
+	println("Main Deck: [")
+	for _, card := range deck.MainDeck {
+		println("\t" + ToString(card))
+	}
+	println("]\n")
+	println("G Deck: [")
+	for _, card := range deck.GDeck {
+		println("\t" + ToString(card))
+	}
+	println("]")
+}
+
+func PrintParty(party *Party) {
+	println("Turn: " + strconv.Itoa(party.Turn))
+	for i, player := range party.Players {
+		
+		println("\n====================")
+		println("Player " + strconv.Itoa(i) + ":")
+		println("====================")
+
+		println("Hand: [")
+		for _, card := range player.Hand {
+			println("\t" + ToString(card))
+		}
+		println("]\n")
+
+		println("====================")
+
+		print("R1 : ")
+		if player.Rear1.TopCard != nil {
+			println("\t" + ToString(player.Rear1.TopCard))
+		}
+
+		print("V : ")
+		if player.Vanguard.TopCard != nil {
+			println("\t" + ToString(player.Vanguard.TopCard))
+		}
+
+		print("R2 : ")
+		if player.Rear2.TopCard != nil {
+			println("\t" + ToString(player.Rear2.TopCard))
+		}	
+
+		print("R3 : ")
+		if player.Rear3.TopCard != nil {
+			println("\t" + ToString(player.Rear3.TopCard))
+		}
+
+		print("R4 : ")
+		if player.Rear4.TopCard != nil {
+			println("\t" + ToString(player.Rear4.TopCard))
+		}
+
+		print("R5 : ")
+		if player.Rear5.TopCard != nil {
+			println("\t" + ToString(player.Rear5.TopCard))
+		}
+
+		println("\n====================")
+
+		println("Damage Zone: [")
+		for _, card := range player.DamageZone {
+			println("\t" + ToString(card))
+		}
+		println("]\n")
+
+		println("====================")
+
+		println("Drop Zone: [")
+		for _, card := range player.DropZone {
+			println("\t" + ToString(card))
+		}
+		println("]\n")
+
+		println("====================")
+
+		println("Bind Zone: [")
+		for _, card := range player.BindZone {
+			println("\t" + ToString(card))
+		}
+		println("]\n")
+
+	}
+}
+
 func findCardByNumber(cards []RawCard, targetNumber string) *RawCard {
-	println("targetNumber: " + targetNumber)
+	// println("targetNumber: " + targetNumber)
 	for i := range cards {
 		if cards[i].CardNumberFull == targetNumber {
 			// On retourne un pointeur vers l'élément trouvé
-			println(cards[i].CardNumberFull)
+			// println(cards[i].CardNumberFull)
 			return &cards[i]
 		}
 	}
 	// Si rien n'est trouvé, on retourne nil
 	return nil
 }
+
+func DeckToPlayer(deck Deck) Player {
+	return Player{
+		RideDeck:    deck.RideDeck[:],
+		MainDeck:    deck.MainDeck[:],
+		GDeck:       deck.GDeck[:],
+		DamageZone:  []*Card{},
+		Hand:        []*Card{},
+		OrderZone:   []*Card{},
+		GuardZone:   []*Card{},
+		TriggerZone: []*Card{},
+		BindZone:    []*Card{},
+		DropZone:    []*Card{},
+		Rear1:     Circle{},
+		Vanguard:  Circle{},
+		Rear2:     Circle{},
+		Rear3:     Circle{},
+		Rear4:     Circle{},
+		Rear5:     Circle{},
+	}
+}
+
 
 func ParseDeckFile(filePath string) (*Deck, error) {
 	file, err := os.Open(filePath)
@@ -141,4 +295,65 @@ func ParseDeckFile(filePath string) (*Deck, error) {
 func parseCardLine(line string) []string {
 	// 1. Extraire la quantité (ex: 1x)
 	return strings.Split(line, "\t")
+}
+
+func InitParty(decks []*Deck) *Party {
+	var players []Player
+
+	for _, deck := range decks {
+		if deck != nil {
+			players = append(players, DeckToPlayer(*deck))
+		}
+	}
+
+	return &Party{
+		Players:    players,
+		Turn:       0,
+		EventQueue: []Event{},
+		History:    []Event{},
+	}
+}
+
+func draw(player *Player, count int) bool {
+	if len(player.MainDeck) >= count {
+		for i := 0; i < count; i++ {
+			player.Hand = append(player.Hand, player.MainDeck[0])
+			player.MainDeck = player.MainDeck[1:]
+		}
+		return true
+	}
+	return false
+}
+
+func InitGame(party *Party, seed string) {
+
+	if seed == "" {
+		seed = strconv.FormatInt(time.Now().UnixNano(), 10)
+	}
+
+	party.seed = seed
+	seedInt, _ := strconv.ParseInt(seed, 10, 64)
+	party.rand = rand.New(rand.NewSource(seedInt))
+
+	// Initial game setup logic here
+	for i := range party.Players {
+		player := &party.Players[i]
+
+		party.rand.Shuffle(len(player.MainDeck), func(i, j int) {
+			player.MainDeck[i], player.MainDeck[j] = player.MainDeck[j], player.MainDeck[i]
+		})
+
+		for j, card := range player.RideDeck {
+			if card != nil && card.Grade == 0 {
+				player.Vanguard.TopCard = card
+				println("Vanguard : " + ToString(card))
+				card.Locked = true
+				player.RideDeck = append(player.RideDeck[:j], player.RideDeck[j+1:]...)
+				break
+			}
+		}
+
+		draw(player, 5)
+	}
+	
 }
