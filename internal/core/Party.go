@@ -23,9 +23,9 @@ type Deck struct {
 }
 
 type Circle struct {
-	TopCard   *Card
-	Soul	  *Card
-	Boon      *Card
+	TopCard *Card
+	Soul    *Card
+	Boon    *Card
 }
 
 type Player struct {
@@ -39,21 +39,110 @@ type Player struct {
 	TriggerZone []*Card
 	BindZone    []*Card
 	DropZone    []*Card
-	Rear1  		Circle
-	Vanguard  	Circle
-	Rear2  		Circle
-	Rear3  		Circle
-	Rear4  		Circle
-	Rear5  		Circle
+	Rear1       Circle
+	Vanguard    Circle
+	Rear2       Circle
+	Rear3       Circle
+	Rear4       Circle
+	Rear5       Circle
 }
 
+const (
+	PhaseStand  = "Stand Phase"
+	PhaseDraw   = "Draw Phase"
+	PhaseRide   = "Ride Phase"
+	PhaseMain   = "Main Phase"
+	PhaseBattle = "Battle Phase"
+	PhaseEnd    = "End Phase"
+)
+
 type Party struct {
-	seed    	string
-	rand        *rand.Rand
-	Players     []Player
-	Turn    	int
-	EventQueue  []Event
-	History     []Event
+	seed         string
+	rand         *rand.Rand
+	Players      []Player
+	Turn         int
+	CurrentPhase string
+	EventQueue   []Event
+	History      []Event
+}
+
+func (party *Party) checkEffects(trigger string) {
+	// Placeholder: In the future, iterate through cards/effects to see if any trigger matches
+	// fmt.Println("Checking effects for:", trigger)
+}
+
+// ProcessPhase executes the standard flow of a phase: Start Effects -> Action -> End Effects
+func (party *Party) ProcessPhase(phaseName string, defaultAction func()) {
+	party.CurrentPhase = phaseName
+	// println("Processing " + phaseName)
+
+	// 1. Start of Phase Effects
+	party.checkEffects("START_" + strings.ToUpper(strings.ReplaceAll(phaseName, " ", "_")))
+
+	// 2. Action
+	// In a full implementation, we would check if an effect REPLACES the default action here.
+	if defaultAction != nil {
+		defaultAction()
+	}
+
+	// 3. End of Phase Effects
+	party.checkEffects("END_" + strings.ToUpper(strings.ReplaceAll(phaseName, " ", "_")))
+}
+
+// StartTurn executes the phases for the current turn's player
+func (party *Party) StartTurn() {
+	party.Turn++
+
+	player := &party.Players[(party.Turn-1)%len(party.Players)]
+	println("Turn", party.Turn, "starts for Player", (party.Turn-1)%len(party.Players))
+
+	party.StandPhase(player)
+	party.DrawPhase(player)
+	party.RidePhase(player)
+	party.MainPhase(player)
+	party.BattlePhase(player)
+	party.EndPhase(player)
+}
+
+func (party *Party) StandPhase(player *Player) {
+	party.ProcessPhase(PhaseStand, func() {
+		// Stand all units
+		// Placeholder: iterate over circles and set IsStand = true (need to add IsStand to Card or Circle)
+		// For now, just logging
+		// println("Standing units...")
+	})
+}
+
+func (party *Party) DrawPhase(player *Player) {
+	party.ProcessPhase(PhaseDraw, func() {
+		// Standard Draw: Draw 1 card
+		// Effects could replace this (e.g., skip draw to do X) if implemented in checkEffects/middleware
+		draw(player, 1)
+	})
+}
+
+func (party *Party) RidePhase(player *Player) {
+	party.ProcessPhase(PhaseRide, func() {
+		// Logic to wait for user input for Ride would go here
+	})
+}
+
+func (party *Party) MainPhase(player *Player) {
+	party.ProcessPhase(PhaseMain, func() {
+		// Main phase actions
+	})
+}
+
+func (party *Party) BattlePhase(player *Player) {
+	party.ProcessPhase(PhaseBattle, func() {
+		// Battle phase actions
+	})
+}
+
+func (party *Party) EndPhase(player *Player) {
+	party.ProcessPhase(PhaseEnd, func() {
+		// End of turn effects
+	})
 }
 
 func PrintDeck(deck *Deck) {
@@ -77,7 +166,7 @@ func PrintDeck(deck *Deck) {
 func PrintParty(party *Party) {
 	println("Turn: " + strconv.Itoa(party.Turn))
 	for i, player := range party.Players {
-		
+
 		println("\n====================")
 		println("Player " + strconv.Itoa(i) + ":")
 		println("====================")
@@ -103,7 +192,7 @@ func PrintParty(party *Party) {
 		print("R2 : ")
 		if player.Rear2.TopCard != nil {
 			println("\t" + ToString(player.Rear2.TopCard))
-		}	
+		}
 
 		print("R3 : ")
 		if player.Rear3.TopCard != nil {
@@ -172,15 +261,14 @@ func DeckToPlayer(deck Deck) Player {
 		TriggerZone: []*Card{},
 		BindZone:    []*Card{},
 		DropZone:    []*Card{},
-		Rear1:     Circle{},
-		Vanguard:  Circle{},
-		Rear2:     Circle{},
-		Rear3:     Circle{},
-		Rear4:     Circle{},
-		Rear5:     Circle{},
+		Rear1:       Circle{},
+		Vanguard:    Circle{},
+		Rear2:       Circle{},
+		Rear3:       Circle{},
+		Rear4:       Circle{},
+		Rear5:       Circle{},
 	}
 }
-
 
 func ParseDeckFile(filePath string) (*Deck, error) {
 	file, err := os.Open(filePath)
@@ -356,5 +444,108 @@ func InitGame(party *Party, seed string) {
 
 		draw(player, 5)
 	}
-	
+}
+
+// DecideTurnOrder simulation
+// Returns true if the players were swapped (i.e. original P1 becomes P0)
+func (party *Party) DecideTurnOrder(onRoll func(int, int), askChoice func(winnerIndex int) string) bool {
+	for {
+		r0 := party.rand.Intn(6) + 1
+		r1 := party.rand.Intn(6) + 1
+
+		onRoll(r0, r1)
+
+		if r0 != r1 {
+			winner := 0
+			if r1 > r0 {
+				winner = 1
+			}
+			choice := askChoice(winner)
+			// If winner chooses second, swap
+			// Default winner is P0 (index winner)
+			// If P0 wins and chooses Second -> Swap
+			// If P1 wins and chooses First -> Swap (so P1 becomes P0)
+
+			doSwap := false
+			if winner == 0 && choice == "second" {
+				doSwap = true
+			} else if winner == 1 && choice == "first" {
+				doSwap = true
+			}
+
+			if doSwap {
+				party.Players[0], party.Players[1] = party.Players[1], party.Players[0]
+			}
+			return doSwap
+		}
+		time.Sleep(1 * time.Second)
+	}
+}
+
+// PerformMulligan executes the Mulligan phase in PARALLEL.
+func (party *Party) PerformMulligan(requestMulligan func(playerIndex int, hand []*Card) []int) {
+	type result struct {
+		Index   int
+		Indices []int
+	}
+	results := make(chan result, len(party.Players))
+
+	// 1. Request mulligans in parallel
+	for i := range party.Players {
+		go func(idx int) {
+			// Provide a copy of hand or just reference, requestMulligan uses it for display
+			// Accessing party.Players[idx].Hand is safe for reading here as main thread waits
+			res := requestMulligan(idx, party.Players[idx].Hand)
+			results <- result{Index: idx, Indices: res}
+		}(i)
+	}
+
+	// 2. Gather results
+	discardMap := make(map[int][]int)
+	for i := 0; i < len(party.Players); i++ {
+		res := <-results
+		discardMap[res.Index] = res.Indices
+	}
+
+	// 3. Apply changes
+	for i := range party.Players {
+		player := &party.Players[i]
+		discardIndices := discardMap[i]
+
+		validIndices := []int{}
+		for _, idx := range discardIndices {
+			if idx >= 0 && idx < len(player.Hand) {
+				validIndices = append(validIndices, idx)
+			}
+		}
+
+		if len(validIndices) > 0 {
+			cardsToDiscard := []*Card{}
+			newHand := []*Card{}
+			tempDeck := []*Card{}
+
+			isDiscarded := make(map[int]bool)
+			for _, idx := range validIndices {
+				isDiscarded[idx] = true
+			}
+
+			for hIdx, card := range player.Hand {
+				if isDiscarded[hIdx] {
+					tempDeck = append(tempDeck, card)
+					cardsToDiscard = append(cardsToDiscard, card)
+				} else {
+					newHand = append(newHand, card)
+				}
+			}
+
+			player.Hand = newHand
+			player.MainDeck = append(player.MainDeck, tempDeck...)
+
+			party.rand.Shuffle(len(player.MainDeck), func(i, j int) {
+				player.MainDeck[i], player.MainDeck[j] = player.MainDeck[j], player.MainDeck[i]
+			})
+
+			draw(player, len(cardsToDiscard))
+		}
+	}
 }

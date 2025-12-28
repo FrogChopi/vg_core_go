@@ -1,16 +1,53 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <title>VG Core WebSocket Client</title>
     <style>
-        body { font-family: sans-serif; padding: 20px; }
-        .controls { margin-bottom: 20px; }
-        button { margin-right: 10px; padding: 5px 10px; }
-        #log { border: 1px solid #ccc; padding: 10px; height: 300px; overflow-y: scroll; background: #f9f9f9; }
-        .status { margin-bottom: 10px; font-weight: bold; }
+        body {
+            font-family: sans-serif;
+            padding: 20px;
+        }
+
+        .controls {
+            margin-bottom: 20px;
+        }
+
+        button {
+            margin-right: 10px;
+            padding: 5px 10px;
+        }
+
+        #log {
+            border: 1px solid #ccc;
+            padding: 10px;
+            height: 300px;
+            overflow-y: scroll;
+            background: #f9f9f9;
+        }
+
+        .status {
+            margin-bottom: 10px;
+            font-weight: bold;
+        }
+
+        #mulligan-area,
+        #dice-area,
+        #order-area {
+            display: none;
+            margin-top: 20px;
+            border: 1px solid #aaa;
+            padding: 10px;
+        }
+
+        .mulligan-btn {
+            margin: 5px;
+            display: inline-block;
+        }
     </style>
 </head>
+
 <body>
     <h1>VG Core Game Client</h1>
     <div class="status">My ID: <span id="my-id"></span></div>
@@ -27,45 +64,221 @@
         <button onclick="closeParty()">Close Party</button>
     </div>
 
+    <div id="dice-area">
+        <h3>Dice Roll</h3>
+        <p id="dice-result"></p>
+    </div>
+
+    <div id="order-area">
+        <h3>You Won the Roll!</h3>
+        <p>Choose your turn order:</p>
+        <button onclick="sendOrder('first')">Go First</button>
+        <button onclick="sendOrder('second')">Go Second</button>
+    </div>
+
+    <div id="mulligan-area">
+        <h3>Mulligan Phase</h3>
+        <p>Select which cards to REDRAW (Discard):</p>
+        <div id="mulligan-buttons"></div>
+    </div>
+
     <div id="log"></div>
 
     <script>
-        let myID = localStorage.getItem('vg_client_id');
+        let myID = sessionStorage.getItem('vg_client_id');
         if (!myID) {
             myID = crypto.randomUUID();
-            localStorage.setItem('vg_client_id', myID);
+            sessionStorage.setItem('vg_client_id', myID);
         }
         document.getElementById('my-id').innerText = myID;
 
-        const ws = new WebSocket('ws://' + window.location.host + '/ws?id=' + myID);
+        let ws;
 
-        ws.onopen = () => log("Connected to WebSocket");
-        ws.onclose = () => log("Disconnected from WebSocket");
-        ws.onmessage = (event) => {
-            const data = JSON.parse(event.data);
-            log("Received: " + JSON.stringify(data));
+        function connect() {
+            return new Promise((resolve, reject) => {
+                if (ws && ws.readyState === WebSocket.OPEN) {
+                    resolve();
+                    return;
+                }
 
-            if (data.event === "room_joined") {
-                document.getElementById('current-room').innerText = data.room_id;
-            } else if (data.event === "player_left" && data.player_id === myID) {
-                document.getElementById('current-room').innerText = "None";
-            } else if (data.event === "party_closed") {
-                log("Party closed.");
+                let host = window.location.host;
+                if (!host) {
+                    host = 'localhost:8080';
+                }
+                ws = new WebSocket('ws://' + host + '/ws?id=' + myID);
+
+                ws.onopen = () => {
+                    log("Connected to WebSocket");
+                    resolve();
+                };
+                ws.onclose = () => log("Disconnected from WebSocket");
+                ws.onmessage = (event) => {
+                    const data = JSON.parse(event.data);
+
+                    if (data.event === "request_mulligan") {
+                        displayMulliganOptions(data.hand);
+                    } else if (data.event === "dice_roll") {
+                        const r0 = data.rolls[0];
+                        const r1 = data.rolls[1];
+                        const myIdx = data.your_index;
+                        const myRoll = data.rolls[myIdx];
+                        const oppRoll = data.rolls[1 - myIdx];
+
+                        let msg = `You rolled ${myRoll}, Opponent rolled ${oppRoll}. `;
+                        if (myRoll > oppRoll) msg += "You Win!";
+                        else if (myRoll < oppRoll) msg += "You Lose.";
+                        else msg += "Tie! Rerolling...";
+
+                        log(data.your_index === 0 ? "You are Player 1 (Initially)" : "You are Player 2 (Initially)");
+                        log(msg);
+                        document.getElementById('dice-result').innerText = msg;
+                        document.getElementById('dice-area').style.display = 'block';
+
+                    } else if (data.event === "ask_first_second") {
+                        document.getElementById('order-area').style.display = 'block';
+                    } else if (data.event === "turn_order") {
+                        alert(data.msg);
+                        log(data.msg);
+                        document.getElementById('dice-area').style.display = 'none';
+                        document.getElementById('order-area').style.display = 'none';
+                    } else if (data.event === "update_hand") {
+                        log("New Hand Received:");
+                        // Simple display for now
+                        const logDiv = document.getElementById('log');
+                        const handInfo = document.createElement("div");
+                        handInfo.style.border = "1px solid blue";
+                        handInfo.style.padding = "5px";
+                        handInfo.style.margin = "5px 0";
+                        handInfo.innerHTML = "<strong>Your Final Hand:</strong><br>" + data.hand.map((c, i) => (i + 1) + ": " + c).join("<br>");
+                        logDiv.prepend(handInfo);
+                    } else if (data.event !== "player_joined" && data.event !== "player_left" && data.event !== "party_created") {
+                        // Less spammy logging
+                        log("Received: " + JSON.stringify(data));
+                    }
+
+                    if (data.event === "room_joined") {
+                        document.getElementById('current-room').innerText = data.room_id;
+                    } else if (data.event === "player_left" && data.player_id === myID) {
+                        document.getElementById('current-room').innerText = "None";
+                    } else if (data.event === "party_closed") {
+                        log("Party closed.");
+                        document.getElementById('mulligan-area').style.display = 'none';
+                        document.getElementById('dice-area').style.display = 'none';
+                        document.getElementById('order-area').style.display = 'none';
+                    } else if (data.event === "party_created") {
+                        log("Party created! Preparation started...");
+                    } else if (data.event === "game_started") {
+                        log("Mulligan complete. Game Started!");
+                        document.getElementById('mulligan-area').style.display = 'none';
+                        document.getElementById('dice-area').style.display = 'none';
+                        document.getElementById('order-area').style.display = 'none';
+                    }
+                };
+            });
+        }
+
+        function displayMulliganOptions(hand) {
+            // Hide previous areas
+            document.getElementById('dice-area').style.display = 'none';
+            document.getElementById('order-area').style.display = 'none';
+
+            const area = document.getElementById('mulligan-area');
+            const container = document.getElementById('mulligan-buttons');
+            container.innerHTML = "";
+            area.style.display = 'block';
+
+            // Generate all 32 combinations for 5 cards
+            // 0 to 31. Bitmask 1 means discard.
+            for (let i = 0; i < 32; i++) {
+                const btn = document.createElement('button');
+                btn.className = 'mulligan-btn';
+
+                let label = "Keep All";
+                let indices = [];
+                if (i > 0) {
+                    let discards = [];
+                    for (let bit = 0; bit < 5; bit++) {
+                        if ((i >> bit) & 1) {
+                            discards.push(bit + 1); // 1-based index for display
+                            indices.push(bit); // 0-based for logic
+                        }
+                    }
+                    label = "Discard: " + discards.join(", ");
+                } else {
+                    indices = []; // Keep all implies discard none
+                }
+
+                btn.innerText = label;
+                btn.onclick = () => {
+                    log("Selected mulligan: " + label);
+                    send("mulligan_response", {
+                        indices: indices
+                    });
+                    area.style.display = 'none';
+                };
+                container.appendChild(btn);
             }
-        };
+
+            // Show hand for reference
+            const handInfo = document.createElement("div");
+            handInfo.innerHTML = "<strong>Your Hand:</strong><br>" + hand.map((c, i) => (i + 1) + ": " + c).join("<br>");
+            container.prepend(handInfo);
+        }
+
+        function sendOrder(choice) {
+            send("order_response", {
+                choice: choice
+            });
+            document.getElementById('order-area').style.display = 'none';
+        }
 
         function send(action, payload = {}) {
-            ws.send(JSON.stringify({ action, payload }));
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                log("Not connected. Connecting...");
+                connect().then(() => {
+                    ws.send(JSON.stringify({
+                        action,
+                        payload
+                    }));
+                });
+                return;
+            }
+            ws.send(JSON.stringify({
+                action,
+                payload
+            }));
         }
 
-        function createRoom() { send("create_room"); }
-        function joinRoom() {
-            const roomId = document.getElementById('room-id-input').value;
-            if (roomId) send("join_room", { room_id: roomId });
+        function createRoom() {
+            connect().then(() => {
+                const roomId = crypto.randomUUID();
+                send("create_room", {
+                    room_id: roomId
+                });
+            });
         }
-        function quitRoom() { send("quit_room"); document.getElementById('current-room').innerText = "None"; }
-        function createParty() { send("create_party"); }
-        function closeParty() { send("close_party"); }
+
+        function joinRoom() {
+            connect().then(() => {
+                const roomId = document.getElementById('room-id-input').value;
+                if (roomId) send("join_room", {
+                    room_id: roomId
+                });
+            });
+        }
+
+        function quitRoom() {
+            send("quit_room");
+            document.getElementById('current-room').innerText = "None";
+        }
+
+        function createParty() {
+            send("create_party");
+        }
+
+        function closeParty() {
+            send("close_party");
+        }
 
         function log(msg) {
             const logDiv = document.getElementById('log');
@@ -75,4 +288,5 @@
         }
     </script>
 </body>
+
 </html>

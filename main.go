@@ -5,7 +5,7 @@ import (
 	"vg_core_go/internal/core"
 )
 
-func defaultGame() void {
+func defaultGame() {
 	deck1, err1 := core.ParseDeckFile("decks/KT_Starter.md")
 	deck2, err2 := core.ParseDeckFile("decks/LM_Starter.md")
 
