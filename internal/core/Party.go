@@ -12,7 +12,8 @@ import (
 
 type Event struct {
 	EventType string
-	FuncCall  func() `json:"-"`
+	Origin    string
+	FuncCall  func()
 }
 
 type Deck struct {

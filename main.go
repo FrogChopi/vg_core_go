@@ -27,5 +27,6 @@ func defaultGame() void {
 }
 
 func main() {
-
+	core.StartServer("8080")
+	// defaultGame()
 }
