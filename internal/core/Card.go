@@ -58,6 +58,7 @@ type Card struct {
 	Flavor         string
 	Boons          []Boon
 	Locked         bool
+	IsStand        bool
 }
 
 func ToString(card *Card) string {
@@ -72,7 +73,6 @@ func ToString(card *Card) string {
 
 	return locked + "[" + card.ID + "] G" + strconv.Itoa(card.Grade) + " - " + card.Name + " => " + card.CardNumberFull + " ATK : " + strconv.Itoa(card.Power) + " DEF : " + strconv.Itoa(card.Shield) + " CRIT : " + strconv.Itoa(card.Critical)
 }
-
 
 func (rc *RawCard) ToCard() (*Card, error) {
 	if rc == nil {

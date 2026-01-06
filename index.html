@@ -50,8 +50,14 @@
 
 <body>
     <h1>VG Core Game Client</h1>
+    <div class="controls">
+        <label>Name: <input type="text" id="player-name-input" value="Player"></label>
+    </div>
     <div class="status">My ID: <span id="my-id"></span></div>
-    <div class="status">Current Room: <span id="current-room">None</span></div>
+    <div class="status">
+        Current Room: <span id="current-room">None</span>
+        <button onclick="copyRoomID()">Copy</button>
+    </div>
 
     <div class="controls">
         <button onclick="createRoom()">Create Room</button>
@@ -82,6 +88,69 @@
         <div id="mulligan-buttons"></div>
     </div>
 
+    <div id="ride-area" style="display:none; border: 1px solid purple; padding: 10px; margin: 10px;">
+        <h3>Ride Phase</h3>
+
+        <div id="ride-selection">
+            <p>Choose a card to Ride:</p>
+            <div id="ride-options"></div>
+            <button onclick="skipRide()">Skip Ride</button>
+        </div>
+
+        <div id="ride-confirmation" style="display:none; border: 1px solid #ccc; padding: 5px; margin-top: 10px;">
+            <h4>Confirm Ride</h4>
+            <p id="ride-target-display"></p>
+            <div id="ride-discard-area" style="display:none;">
+                <p>Select 1 card to discard for cost:</p>
+                <div id="ride-discard-options"></div>
+            </div>
+            <br>
+            <button id="btn-confirm-ride" onclick="finalizeRide()" disabled>Confirm Ride</button>
+            <button onclick="cancelRideSelection()">Cancel</button>
+        </div>
+    </div>
+
+    <div id="main-phase-area" style="display:none; border: 1px solid green; padding: 10px; margin: 10px;">
+        <h3>Main Phase</h3>
+        <p>Field State:</p>
+        <div id="field-display" style="font-family: monospace; white-space: pre;"></div>
+        <br>
+        <h4>Actions</h4>
+        <div id="action-controls">
+            <button onclick="mainActionCall()">Call Unit</button>
+            <button onclick="mainActionMove()">Move Unit</button>
+            <button onclick="mainActionOrder()">Play Order</button>
+            <button onclick="mainActionAct()">Activate Skill</button>
+            <button onclick="mainActionEnd()">End Phase</button>
+        </div>
+        <div id="hand-list"></div>
+    </div>
+
+    <div id="battle-phase-area" style="display:none; border: 1px solid red; padding: 10px; margin: 10px;">
+        <h3>Battle Phase</h3>
+        <p>Choose Action:</p>
+        <button onclick="battleActionAttack()">Attack</button>
+        <button onclick="battleActionEnd()">End Phase</button>
+    </div>
+
+    <div id="call-selection-area" style="display:none; border: 1px solid blue; padding: 10px; margin: 10px;">
+        <h3>Call Unit</h3>
+        <p>1. Select Unit from Hand:</p>
+        <div id="call-hand-options"></div>
+        <p>2. Select Target Circle:</p>
+        <div id="call-circle-options">
+            <button onclick="selectCallCircle('R1')">R1 (Front-Left)</button>
+            <button onclick="selectCallCircle('R2')">R2 (Front-Right)</button>
+            <button onclick="selectCallCircle('R3')">R3 (Back-Right)</button>
+            <button onclick="selectCallCircle('R4')">R4 (Back-Center)</button>
+            <button onclick="selectCallCircle('R5')">R5 (Back-Left)</button>
+        </div>
+        <br>
+        <p>Selected: <span id="call-summary">None</span></p>
+        <button id="btn-confirm-call" onclick="confirmCall()" disabled>Confirm Call</button>
+        <button onclick="cancelCall()">Cancel</button>
+    </div>
+
     <div id="log"></div>
 
     <script>
@@ -92,6 +161,247 @@
         }
         document.getElementById('my-id').innerText = myID;
 
+        let currentRideRequest = null;
+        let pendingRide = null;
+
+        function skipRide() {
+            if (!currentRideRequest) return;
+            ws.send(JSON.stringify({
+                action: "ride_response",
+                payload: {
+                    card_id: "skip",
+                    discard_index: -1
+                }
+            }));
+            document.getElementById('ride-area').style.display = 'none';
+        }
+
+        function rideCard(cardID, isFromRideDeck) {
+            pendingRide = { cardID, isFromRideDeck, discardIndex: -1 };
+
+            // Switch UI
+            document.getElementById('ride-selection').style.display = 'none';
+            document.getElementById('ride-confirmation').style.display = 'block';
+
+            document.getElementById('ride-target-display').innerText = "Selected to Ride: " + cardID + (isFromRideDeck ? " (From Deck)" : " (From Hand)");
+
+            const discardArea = document.getElementById('ride-discard-area');
+            const confirmBtn = document.getElementById('btn-confirm-ride');
+
+            if (isFromRideDeck) {
+                discardArea.style.display = 'block';
+                confirmBtn.disabled = true;
+                confirmBtn.innerText = "Select Discard...";
+
+                // Populate discard options (Hand)
+                const container = document.getElementById('ride-discard-options');
+                container.innerHTML = "";
+                const hand = currentRideRequest.hand;
+                hand.forEach((c, idx) => {
+                    let b = document.createElement("button");
+                    b.innerText = c;
+                    b.onclick = (e) => selectRideDiscard(idx, e.target);
+                    container.appendChild(b);
+                    container.appendChild(document.createElement("br"));
+                });
+            } else {
+                discardArea.style.display = 'none';
+                confirmBtn.disabled = false;
+                confirmBtn.innerText = "Confirm Ride";
+            }
+        }
+
+        function selectRideDiscard(idx, btnElement) {
+            pendingRide.discardIndex = idx;
+
+            // Reset styles
+            const container = document.getElementById('ride-discard-options');
+            Array.from(container.children).forEach(child => {
+                if (child.tagName === 'BUTTON') child.style.fontWeight = "normal";
+            });
+            btnElement.style.fontWeight = "bold";
+
+            const btn = document.getElementById('btn-confirm-ride');
+            btn.disabled = false;
+            btn.innerText = "Confirm Ride (Discarding card " + (idx + 1) + ")";
+        }
+
+        function cancelRideSelection() {
+            pendingRide = null;
+            document.getElementById('ride-confirmation').style.display = 'none';
+            document.getElementById('ride-selection').style.display = 'block';
+        }
+
+        function finalizeRide() {
+            if (!pendingRide) return;
+            ws.send(JSON.stringify({
+                action: "ride_response",
+                payload: {
+                    card_id: pendingRide.cardID,
+                    discard_index: pendingRide.discardIndex
+                }
+            }));
+            document.getElementById('ride-area').style.display = 'none';
+            cancelRideSelection();
+        }
+
+        let currentMainRequest = null;
+
+        let pendingCall = { cardID: null, circle: null, cardName: null };
+
+        function mainActionCall() {
+            document.getElementById('main-phase-area').style.display = 'none';
+            document.getElementById('call-selection-area').style.display = 'block';
+            populateCallHandOptions();
+            pendingCall = { cardID: null, circle: null, cardName: null };
+            updateCallSummary();
+        }
+
+        function populateCallHandOptions() {
+            const container = document.getElementById('call-hand-options');
+            container.innerHTML = "";
+            const hand = currentMainRequest.hand;
+            hand.forEach((cardStr, idx) => {
+                const b = document.createElement("button");
+                b.innerText = cardStr;
+                b.onclick = () => selectCallUnit(cardStr, idx, b);
+                container.appendChild(b);
+            });
+        }
+
+        function selectCallUnit(cardStr, idx, btnElement) {
+            const idMatch = cardStr.match(/^\[(.*?)\]/);
+            if (!idMatch) return;
+            pendingCall.cardID = idMatch[1];
+            pendingCall.cardName = cardStr;
+
+            const container = document.getElementById('call-hand-options');
+            Array.from(container.children).forEach(child => child.style.fontWeight = "normal");
+            btnElement.style.fontWeight = "bold";
+
+            updateCallSummary();
+        }
+
+        function selectCallCircle(circle) {
+            pendingCall.circle = circle;
+
+            const container = document.getElementById('call-circle-options');
+            Array.from(container.children).forEach(child => {
+                if (child.innerText.startsWith(circle)) child.style.fontWeight = "bold";
+                else child.style.fontWeight = "normal";
+            });
+
+            updateCallSummary();
+        }
+
+        function updateCallSummary() {
+            const summary = document.getElementById('call-summary');
+            if (pendingCall.cardID && pendingCall.circle) {
+                summary.innerText = "Unit: " + pendingCall.cardName + " -> Circle: " + pendingCall.circle;
+                document.getElementById('btn-confirm-call').disabled = false;
+            } else {
+                summary.innerText = (pendingCall.cardName || "None") + " -> " + (pendingCall.circle || "None");
+                document.getElementById('btn-confirm-call').disabled = true;
+            }
+        }
+
+        function confirmCall() {
+            if (!pendingCall.cardID || !pendingCall.circle) return;
+
+            ws.send(JSON.stringify({
+                action: "main_action_response",
+                payload: {
+                    action: "CALL",
+                    payload: {
+                        card_id: pendingCall.cardID,
+                        target_circle: pendingCall.circle
+                    }
+                }
+            }));
+
+            document.getElementById('call-selection-area').style.display = 'none';
+        }
+
+        function cancelCall() {
+            document.getElementById('call-selection-area').style.display = 'none';
+            document.getElementById('main-phase-area').style.display = 'block';
+        }
+
+        function mainActionMove() {
+            if (!currentMainRequest) return;
+            const c1 = prompt("Enter Circle 1 (R1...R5):");
+            const c2 = prompt("Enter Circle 2 (R1...R5):");
+
+            ws.send(JSON.stringify({
+                action: "main_action_response",
+                payload: {
+                    action: "MOVE",
+                    payload: {
+                        circle_1: c1,
+                        circle_2: c2
+                    }
+                }
+            }));
+            document.getElementById('main-phase-area').style.display = 'none';
+        }
+
+        function mainActionOrder() {
+            if (!currentMainRequest) return;
+            const cardIdxStr = prompt("Enter Hand Index (1-based) to Play as Order:");
+            if (!cardIdxStr) return;
+
+            // Get Card ID from index
+            const hand = currentMainRequest.hand;
+            const idx = parseInt(cardIdxStr) - 1;
+            if (idx < 0 || idx >= hand.length) return;
+
+            const cardStr = hand[idx];
+            const idMatch = cardStr.match(/^\[(.*?)\]/);
+            if (!idMatch) return;
+            const cardID = idMatch[1];
+
+            ws.send(JSON.stringify({
+                action: "main_action_response",
+                payload: {
+                    action: "PLAY_ORDER",
+                    payload: {
+                        card_id: cardID
+                    }
+                }
+            }));
+            document.getElementById('main-phase-area').style.display = 'none';
+        }
+
+        function mainActionAct() {
+            alert("ACT skills not implemented yet.");
+        }
+
+        function mainActionEnd() {
+            ws.send(JSON.stringify({
+                action: "main_action_response",
+                payload: {
+                    action: "END",
+                    payload: {}
+                }
+            }));
+            document.getElementById('main-phase-area').style.display = 'none';
+        }
+
+        function battleActionAttack() {
+            alert("Attack logic not fully implemented in UI.");
+        }
+
+        function battleActionEnd() {
+            ws.send(JSON.stringify({
+                action: "battle_action_response",
+                payload: {
+                    action: "END",
+                    payload: {}
+                }
+            }));
+            document.getElementById('battle-phase-area').style.display = 'none';
+        }
+
         let ws;
 
         function connect() {
@@ -101,26 +411,131 @@
                     return;
                 }
 
+                const nameInput = document.getElementById('player-name-input');
+                let name = nameInput ? nameInput.value : "Player";
+                if (!name) name = "Player";
+
                 let host = window.location.host;
                 if (!host) {
                     host = 'localhost:8080';
                 }
-                ws = new WebSocket('ws://' + host + '/ws?id=' + myID);
+                ws = new WebSocket('ws://' + host + '/ws?id=' + myID + '&name=' + encodeURIComponent(name));
 
                 ws.onopen = () => {
-                    log("Connected to WebSocket");
+                    log("Connected to websocket !");
                     resolve();
                 };
                 ws.onclose = () => log("Disconnected from WebSocket");
                 ws.onmessage = (event) => {
                     const data = JSON.parse(event.data);
 
+                    if (data.error) {
+                        log("Error: " + data.error);
+                        return;
+                    }
+
                     if (data.event === "request_mulligan") {
                         displayMulliganOptions(data.hand);
+                    } else if (data.event === "request_ride") {
+                        currentRideRequest = data;
+                        document.getElementById('ride-area').style.display = 'block';
+                        const optionsDiv = document.getElementById('ride-options');
+                        optionsDiv.innerHTML = "";
+
+                        if (data.can_ride_from_deck) {
+                            const rDeck = data.ride_deck;
+                            const vgGrade = data.vanguard_grade !== undefined ? data.vanguard_grade : 0;
+
+                            for (let i = 0; i < rDeck.length; i += 2) {
+                                let id = rDeck[i];
+                                let text = rDeck[i + 1];
+
+                                const gradeMatch = text.match(/ G(-?\d+) -/);
+                                if (gradeMatch) {
+                                    const grade = parseInt(gradeMatch[1]);
+
+                                    // Validation: 
+                                    // 1. Must be Non-Negative (ignore G-1 Crests/Gauges for riding)
+                                    // 2. Must be G == VG or G == VG + 1
+                                    if (grade >= 0 && (grade === vgGrade || grade === vgGrade + 1)) {
+                                        let b = document.createElement("button");
+                                        b.innerText = "Ride Deck: " + text;
+                                        b.onclick = () => rideCard(id, true);
+                                        optionsDiv.appendChild(b);
+                                        optionsDiv.appendChild(document.createElement("br"));
+                                    }
+                                }
+                            }
+                        }
+
+                        optionsDiv.appendChild(document.createElement("hr"));
+                        optionsDiv.appendChild(document.createTextNode("Hand:"));
+                        optionsDiv.appendChild(document.createElement("br"));
+
+                        const hand = data.hand;
+                        const vgGrade = data.vanguard_grade !== undefined ? data.vanguard_grade : 0;
+                        hand.forEach(cardStr => {
+                            const idMatch = cardStr.match(/^\[(.*?)\]/);
+                            const gradeMatch = cardStr.match(/ G(\d+) -/);
+
+                            if (idMatch && gradeMatch) {
+                                const id = idMatch[1];
+                                const grade = parseInt(gradeMatch[1]);
+
+                                // Validation: Can ride Grade == VG+1 or Grade == VG
+                                if (grade === vgGrade || grade === vgGrade + 1) {
+                                    let b = document.createElement("button");
+                                    b.innerText = cardStr;
+                                    b.onclick = () => rideCard(id, false);
+                                    optionsDiv.appendChild(b);
+                                    optionsDiv.appendChild(document.createElement("br"));
+                                }
+                            }
+                        });
+
+                    } else if (data.event === "request_main_action") {
+                        currentMainRequest = data;
+                        document.getElementById('main-phase-area').style.display = 'block';
+
+                        // Display Field
+                        const f = data.field;
+                        let fieldText = "";
+                        fieldText += `         [ ${f["R2"]} ]   [ ${f["V"]} ]   [ ${f["R1"]} ]\n`;
+                        fieldText += `         [ ${f["R5"]} ]   [     ]   [ ${f["R3"]} ]\n`; // V-Back usually empty or specific logic?
+                        // Standard OverDress: 
+                        // Front: R2  V  R1
+                        // Back:  R5  V(Soul/Booster?) R3 
+                        // Actually V Back is R4 (Center Back)
+                        // My code uses R4.
+                        fieldText += `         [ ${f["R5"]} ]   [ ${f["R4"]} ]   [ ${f["R3"]} ]\n`;
+
+                        document.getElementById('field-display').innerText = fieldText;
+
+                        // Display Hand List
+                        const hList = document.getElementById('hand-list');
+                        hList.innerHTML = "<strong>Hand:</strong><br>";
+                        data.hand.forEach((c, i) => {
+                            let d = document.createElement("div");
+                            d.innerText = (i + 1) + ": " + c;
+                            hList.appendChild(d);
+                        });
+
+                    } else if (data.event === "request_battle_action") {
+                        document.getElementById('main-phase-area').style.display = 'none';
+                        document.getElementById('battle-phase-area').style.display = 'block';
+
                     } else if (data.event === "dice_roll") {
                         const r0 = data.rolls[0];
                         const r1 = data.rolls[1];
                         const myIdx = data.your_index;
+
+                        // Update Title
+                        document.title = `Player ${myIdx} - VG Core`;
+                        const headerTitle = document.getElementById('header-title'); // Assuming an element with id 'header-title' exists
+                        if (headerTitle) {
+                            headerTitle.innerText = `VG Core - Player ${myIdx}`;
+                        }
+
                         const myRoll = data.rolls[myIdx];
                         const oppRoll = data.rolls[1 - myIdx];
 
@@ -137,10 +552,12 @@
                     } else if (data.event === "ask_first_second") {
                         document.getElementById('order-area').style.display = 'block';
                     } else if (data.event === "turn_order") {
-                        alert(data.msg);
                         log(data.msg);
                         document.getElementById('dice-area').style.display = 'none';
                         document.getElementById('order-area').style.display = 'none';
+                    } else if (data.event === "log") {
+                        console.log("Processing LOG event:", data.message);
+                        appendLog(data.message);
                     } else if (data.event === "update_hand") {
                         log("New Hand Received:");
                         // Simple display for now
@@ -152,8 +569,7 @@
                         handInfo.innerHTML = "<strong>Your Final Hand:</strong><br>" + data.hand.map((c, i) => (i + 1) + ": " + c).join("<br>");
                         logDiv.prepend(handInfo);
                     } else if (data.event !== "player_joined" && data.event !== "player_left" && data.event !== "party_created") {
-                        // Less spammy logging
-                        log("Received: " + JSON.stringify(data));
+                        console.log("Ignored event:", data.event);
                     }
 
                     if (data.event === "room_joined") {
@@ -250,10 +666,10 @@
         }
 
         function createRoom() {
+            log("Creating Room...");
             connect().then(() => {
-                const roomId = crypto.randomUUID();
                 send("create_room", {
-                    room_id: roomId
+                    room_id: ""
                 });
             });
         }
@@ -261,9 +677,12 @@
         function joinRoom() {
             connect().then(() => {
                 const roomId = document.getElementById('room-id-input').value;
-                if (roomId) send("join_room", {
-                    room_id: roomId
-                });
+                if (roomId) {
+                    log("Joining Room " + roomId + "...");
+                    send("join_room", {
+                        room_id: roomId
+                    });
+                }
             });
         }
 
@@ -280,12 +699,31 @@
             send("close_party");
         }
 
-        function log(msg) {
+        function copyRoomID() {
+            const roomId = document.getElementById('current-room').innerText;
+            if (roomId && roomId !== "None") {
+                navigator.clipboard.writeText(roomId);
+            }
+        }
+
+        function appendLog(msg) {
             const logDiv = document.getElementById('log');
             const p = document.createElement('div');
-            p.innerText = new Date().toLocaleTimeString() + " - " + msg;
+            p.innerText = msg;
             logDiv.prepend(p);
         }
+
+        function localLog(msg) {
+            const nameInput = document.getElementById('player-name-input');
+            const name = nameInput ? nameInput.value : "Player";
+            const time = new Date().toLocaleTimeString();
+            // Format: HH:MM:ss - <name>#<id> : <msg>
+            const full = `${time} - ${name}#${myID} : ${msg}`;
+            appendLog(full);
+        }
+
+        // Alias log to localLog
+        const log = localLog;
     </script>
 </body>
 
